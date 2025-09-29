@@ -6,6 +6,7 @@ import {
   Bar,
   AreaChart,
   Area,
+  ComposedChart,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -29,6 +30,13 @@ const COLORS = [
 export default function DataGraph({ config }: DataGraphProps) {
   const chartData = prepareChartData(config.series)
   const chartType = config.series[0]?.type || 'line'
+
+  console.log('DataGraph rendering with series:', config.series.map(s => ({
+    id: s.id,
+    name: s.name,
+    type: s.type,
+    dataLength: s.data.length
+  })))
 
   const formatXAxis = (tickItem: string) => {
     const date = new Date(tickItem)
@@ -61,6 +69,63 @@ export default function DataGraph({ config }: DataGraphProps) {
   }
 
   const renderChart = () => {
+    // For mixed chart types, use ComposedChart
+    const hasMixedTypes = config.series.some(s => s.type !== config.series[0].type)
+
+    if (hasMixedTypes || config.series.length > 1) {
+      // Use ComposedChart for mixed types
+      return (
+        <ComposedChart data={chartData}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+          <XAxis
+            dataKey="timestamp"
+            tickFormatter={formatXAxis}
+            stroke="#6B7280"
+          />
+          <YAxis stroke="#6B7280" />
+          <Tooltip content={<CustomTooltip />} />
+          {config.showLegend !== false && <Legend />}
+          {config.series.map((series, index) => {
+            if (series.type === 'area') {
+              return (
+                <Area
+                  key={series.id}
+                  type="monotone"
+                  dataKey={series.id}
+                  name={series.name}
+                  stroke={series.color || COLORS[index % COLORS.length]}
+                  fill={series.color || COLORS[index % COLORS.length]}
+                  fillOpacity={0.6}
+                />
+              )
+            } else if (series.type === 'bar') {
+              return (
+                <Bar
+                  key={series.id}
+                  dataKey={series.id}
+                  name={series.name}
+                  fill={series.color || COLORS[index % COLORS.length]}
+                />
+              )
+            } else {
+              return (
+                <Line
+                  key={series.id}
+                  type="monotone"
+                  dataKey={series.id}
+                  name={series.name}
+                  stroke={series.color || COLORS[index % COLORS.length]}
+                  strokeWidth={2}
+                  dot={false}
+                />
+              )
+            }
+          })}
+        </ComposedChart>
+      )
+    }
+
+    // Single chart type - use the original logic
     switch (chartType) {
       case 'bar':
         return (
@@ -80,7 +145,6 @@ export default function DataGraph({ config }: DataGraphProps) {
                 dataKey={series.id}
                 name={series.name}
                 fill={series.color || COLORS[index % COLORS.length]}
-                unit={series.unit}
               />
             ))}
           </BarChart>
@@ -107,7 +171,6 @@ export default function DataGraph({ config }: DataGraphProps) {
                 stroke={series.color || COLORS[index % COLORS.length]}
                 fill={series.color || COLORS[index % COLORS.length]}
                 fillOpacity={0.6}
-                unit={series.unit}
               />
             ))}
           </AreaChart>
@@ -134,7 +197,6 @@ export default function DataGraph({ config }: DataGraphProps) {
                 stroke={series.color || COLORS[index % COLORS.length]}
                 strokeWidth={2}
                 dot={false}
-                unit={series.unit}
               />
             ))}
           </LineChart>
@@ -163,6 +225,10 @@ function prepareChartData(series: DataSeries[]) {
   const dataMap = new Map<string, any>()
 
   series.forEach(s => {
+    console.log(`Processing series ${s.name}: ${s.data.length} points, type: ${s.type}`)
+    if (s.data.length === 0) {
+      console.warn(`⚠️ Series "${s.name}" has no data points!`)
+    }
     s.data.forEach(point => {
       const key = point.timestamp.toISOString()
       if (!dataMap.has(key)) {
@@ -178,7 +244,15 @@ function prepareChartData(series: DataSeries[]) {
     })
   })
 
-  return Array.from(dataMap.values()).sort((a, b) =>
+  const result = Array.from(dataMap.values()).sort((a, b) =>
     new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
   )
+
+  console.log('Prepared chart data:', result.length, 'points')
+  if (result.length > 0) {
+    console.log('First point:', result[0])
+    console.log('Last point:', result[result.length - 1])
+  }
+
+  return result
 }

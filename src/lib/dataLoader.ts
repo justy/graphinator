@@ -43,11 +43,12 @@ export class DataLoader {
   static async loadFromAPI(
     url: string,
     config: TransformConfig,
-    dateRange?: { start: Date; end: Date }
+    dateRange?: { start: Date; end: Date },
+    maxPoints: number = 100
   ): Promise<DataPoint[]> {
     // Check if this is a date range request with URL template
     if (dateRange && url.includes('{{date}}')) {
-      return this.loadDateRangeFromAPI(url, config, dateRange)
+      return this.loadDateRangeFromAPI(url, config, dateRange, maxPoints)
     }
 
     // Single API call - use proxy for localhost URLs to avoid CORS
@@ -69,26 +70,48 @@ export class DataLoader {
   private static async loadDateRangeFromAPI(
     urlTemplate: string,
     config: TransformConfig,
-    dateRange: { start: Date; end: Date }
+    dateRange: { start: Date; end: Date },
+    maxPoints: number = 100
   ): Promise<DataPoint[]> {
     const { start, end } = dateRange
     const urlDateFormat = config.urlDateFormat || 'yyyy-MM-dd'
     const allData: any[] = []
 
     // Generate dates for the range
-    const currentDate = new Date(start)
+    const startDate = new Date(start)
     const endDate = new Date(end)
-    const dates: Date[] = []
 
-    while (currentDate <= endDate) {
-      dates.push(new Date(currentDate))
-      currentDate.setDate(currentDate.getDate() + 1)
+    // Calculate total days in range
+    const totalDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1
+
+    // Determine sampling strategy
+    let dates: Date[] = []
+
+    if (totalDays <= maxPoints) {
+      // If total days is less than max points, fetch all days
+      const currentDate = new Date(startDate)
+      while (currentDate <= endDate) {
+        dates.push(new Date(currentDate))
+        currentDate.setDate(currentDate.getDate() + 1)
+      }
+      console.log(`📅 Fetching all ${dates.length} dates (within ${maxPoints} point limit)`)
+    } else {
+      // Sample dates evenly across the range
+      const interval = totalDays / maxPoints
+      for (let i = 0; i < maxPoints; i++) {
+        const daysToAdd = Math.floor(i * interval)
+        const sampleDate = new Date(startDate)
+        sampleDate.setDate(sampleDate.getDate() + daysToAdd)
+        if (sampleDate <= endDate) {
+          dates.push(sampleDate)
+        }
+      }
+      console.log(`📅 Sampling ${dates.length} dates from ${totalDays} total days (max ${maxPoints} points)`)
+      console.log(`   Sampling interval: approximately every ${Math.ceil(interval)} days`)
     }
 
     // Fetch data sequentially with delays to avoid overwhelming the API
     const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
-
-    console.log(`📅 Fetching data for ${dates.length} dates sequentially...`)
 
     for (let index = 0; index < dates.length; index++) {
       const date = dates[index]
@@ -132,9 +155,12 @@ export class DataLoader {
 
         // Always use our generated date to ensure consistency
         // Override whatever date the API returns to avoid parsing issues
+        // Set to midnight UTC to align with weather data
+        const alignedDate = new Date(date)
+        alignedDate.setUTCHours(0, 0, 0, 0)
         responseData = {
           ...responseData,
-          [config.timestampField]: date.toISOString()
+          [config.timestampField]: alignedDate.toISOString()
         }
 
         allData.push(responseData)
@@ -261,13 +287,25 @@ export class DataLoader {
     longitude: number,
     startDate: string,
     endDate: string,
-    variable: string = 'temperature_2m_max'
+    variable: string = 'temperature_2m_max',
+    maxPoints: number = 100
   ): Promise<DataPoint[]> {
     try {
-      const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&start_date=${startDate}&end_date=${endDate}&daily=${variable}`
+      // Use historical API for past dates, forecast API for future dates
+      const today = new Date()
+      const start = new Date(startDate)
+      const isHistorical = start < today
+
+      const baseUrl = isHistorical
+        ? 'https://archive-api.open-meteo.com/v1/archive'
+        : 'https://api.open-meteo.com/v1/forecast'
+
+      const url = `${baseUrl}?latitude=${latitude}&longitude=${longitude}&start_date=${startDate}&end_date=${endDate}&daily=${variable}&timezone=auto`
+      console.log(`🌤️ Fetching weather from: ${url}`)
       const response = await axios.get(url)
 
       if (!response.data || !response.data.daily) {
+        console.log('⚠️ No daily data in weather response')
         return []
       }
 
@@ -275,11 +313,21 @@ export class DataLoader {
       const times = daily.time || []
       const values = daily[variable] || []
 
-      return times.map((time: string, index: number) => ({
-        timestamp: new Date(time),
-        value: values[index] || 0,
-        label: variable.replace(/_/g, ' ')
-      }))
+      console.log(`🌤️ Weather response: ${times.length} days, first value: ${values[0]}, last value: ${values[values.length - 1]}`)
+
+      const points = times.map((time: string, index: number) => {
+        // Ensure weather timestamps are at midnight UTC
+        const timestamp = new Date(time)
+        timestamp.setUTCHours(0, 0, 0, 0)
+        return {
+          timestamp,
+          value: values[index] || 0,
+          label: variable.replace(/_/g, ' ')
+        }
+      })
+
+      console.log(`🌤️ Converted to ${points.length} data points`)
+      return points
     } catch (error) {
       console.error('Error loading weather data:', error)
       return []

@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react'
 import DataGraph from '@/components/DataGraph'
 import DataSourceManager from '@/components/DataSourceManager'
+import ExampleManager from '@/components/ExampleManager'
 import { DataLoader } from '@/lib/dataLoader'
 import { DataSource, DataSeries, GraphConfig, DataPoint, TransformConfig, DateRange } from '@/types/data'
+import { Example, ExampleDataSource, PREDEFINED_EXAMPLES } from '@/types/examples'
 import { format, subDays } from 'date-fns'
 
 export default function Home() {
@@ -11,10 +13,12 @@ export default function Home() {
   const [loading, setLoading] = useState(false)
   const [graphTitle, setGraphTitle] = useState('Data Visualization')
   const [showExamples, setShowExamples] = useState(false)
+  const [showExampleManager, setShowExampleManager] = useState(false)
   const [dateRange, setDateRange] = useState<DateRange>({
     start: subDays(new Date(), 30),
     end: new Date()
   })
+  const [maxDataPoints, setMaxDataPoints] = useState(100)
 
   const handleAddSource = async (source: DataSource) => {
     setDataSources([...dataSources, source])
@@ -32,7 +36,7 @@ export default function Home() {
       } else if (source.type === 'json' && source.file && source.transformConfig) {
         data = await DataLoader.loadFromJSON(source.file, source.transformConfig)
       } else if (source.type === 'api' && source.url && source.transformConfig) {
-        data = await DataLoader.loadFromAPI(source.url, source.transformConfig, dateRange)
+        data = await DataLoader.loadFromAPI(source.url, source.transformConfig, dateRange, maxDataPoints)
       }
 
       const newSeries: DataSeries = {
@@ -55,13 +59,22 @@ export default function Home() {
     }
   }
 
+  const [currentExampleName, setCurrentExampleName] = useState<string | null>(null)
+
   const reloadAllSources = async () => {
     // Check if we're showing examples
-    if (showExamples) {
-      // Reload the currently active example
-      if (graphTitle.includes('Solar')) {
+    if (showExamples && currentExampleName) {
+      // Reload the current example with new date range
+      setLoading(true)
+
+      // Determine which example to reload based on the current title
+      if (currentExampleName.includes('Solar Generation vs Temperature')) {
+        await loadSolarVsTemperatureExample()
+      } else if (currentExampleName.includes('Solar vs Consumption')) {
+        await loadSolarVsConsumptionExample()
+      } else if (currentExampleName.includes('Solar Generation') && !currentExampleName.includes('vs')) {
         await loadSolarExample()
-      } else if (graphTitle.includes('Weather')) {
+      } else if (currentExampleName.includes('Weather')) {
         await loadExampleData()
       }
       return
@@ -85,6 +98,7 @@ export default function Home() {
   const loadExampleData = async () => {
     setLoading(true)
     setShowExamples(true)
+    setCurrentExampleName('Coledale Weather')
 
     try {
       // Use the graph's date range instead of hardcoded dates
@@ -93,7 +107,8 @@ export default function Home() {
         150.9451,  // Coledale, NSW, Australia longitude
         format(dateRange.start, 'yyyy-MM-dd'),
         format(dateRange.end, 'yyyy-MM-dd'),
-        'temperature_2m_max'
+        'temperature_2m_max',
+        maxDataPoints
       )
 
       const weatherSeries: DataSeries = {
@@ -110,7 +125,8 @@ export default function Home() {
         150.9451,  // Coledale, NSW, Australia longitude
         format(dateRange.start, 'yyyy-MM-dd'),
         format(dateRange.end, 'yyyy-MM-dd'),
-        'precipitation_sum'
+        'precipitation_sum',
+        maxDataPoints
       )
 
       const precipSeries: DataSeries = {
@@ -136,9 +152,24 @@ export default function Home() {
     }
   }
 
+  const loadSolarVsTemperatureExample = async () => {
+    const example = PREDEFINED_EXAMPLES.find(e => e.id === 'solar-vs-temperature')
+    if (example) {
+      await loadExampleFromManager(example)
+    }
+  }
+
+  const loadSolarVsConsumptionExample = async () => {
+    const example = PREDEFINED_EXAMPLES.find(e => e.id === 'solar-consumption')
+    if (example) {
+      await loadExampleFromManager(example)
+    }
+  }
+
   const loadSolarExample = async () => {
     setLoading(true)
     setShowExamples(true)
+    setCurrentExampleName('Solar Generation')
 
     // Clear previous data to ensure consistency
     setDataSeries([])
@@ -152,7 +183,7 @@ export default function Home() {
         urlDateFormat: 'ddMMyyyy'
       }
 
-      const data = await DataLoader.loadFromAPI(urlTemplate, config, dateRange)
+      const data = await DataLoader.loadFromAPI(urlTemplate, config, dateRange, maxDataPoints)
 
       // Only set data if we got valid results
       if (data && data.length > 0) {
@@ -185,6 +216,92 @@ export default function Home() {
     setDataSeries([])
     setGraphTitle('Data Visualization')
     setShowExamples(false)
+    setCurrentExampleName(null)
+  }
+
+  const loadExampleFromManager = async (example: Example) => {
+    setLoading(true)
+    setShowExamples(true)
+    setDataSeries([])
+
+    try {
+      const allSeries: DataSeries[] = []
+
+      for (const dataSource of example.dataSources) {
+        console.log(`📊 Processing data source: ${dataSource.name}`, {
+          id: dataSource.id,
+          hasLatitude: !!dataSource.latitude,
+          hasLongitude: !!dataSource.longitude,
+          hasWeatherVariable: !!dataSource.weatherVariable,
+          hasUrlTemplate: !!dataSource.urlTemplate,
+          hasStaticUrl: !!dataSource.staticUrl,
+          fullDataSource: dataSource
+        })
+
+        let data: DataPoint[] = []
+
+        if (dataSource.latitude && dataSource.longitude && dataSource.weatherVariable) {
+          // Weather data source
+          console.log(`🌤️ Loading weather data: ${dataSource.weatherVariable} for ${dataSource.latitude}, ${dataSource.longitude}`)
+          data = await DataLoader.loadWeatherData(
+            dataSource.latitude,
+            dataSource.longitude,
+            format(dateRange.start, 'yyyy-MM-dd'),
+            format(dateRange.end, 'yyyy-MM-dd'),
+            dataSource.weatherVariable,
+            maxDataPoints
+          )
+          console.log(`🌤️ Weather data loaded: ${data.length} points`)
+        } else if (dataSource.urlTemplate) {
+          // API with date template
+          console.log(`🔗 Loading from URL template: ${dataSource.urlTemplate}`)
+          data = await DataLoader.loadFromAPI(
+            dataSource.urlTemplate,
+            dataSource.config,
+            dateRange,
+            maxDataPoints
+          )
+        } else if (dataSource.staticUrl) {
+          // Static API endpoint
+          console.log(`📡 Loading from static URL: ${dataSource.staticUrl}`)
+          data = await DataLoader.loadFromAPI(
+            dataSource.staticUrl,
+            dataSource.config
+          )
+        } else {
+          console.warn(`⚠️ No valid data source configuration found for ${dataSource.name}`)
+        }
+
+        const series: DataSeries = {
+          id: dataSource.id,
+          name: dataSource.name,
+          data,
+          type: dataSource.chartType || 'line',
+          color: dataSource.color,
+          unit: dataSource.name.includes('°C') ? '°C' :
+                dataSource.name.includes('kWh') ? 'kWh' :
+                dataSource.name.includes('mm') ? 'mm' : undefined
+        }
+
+        allSeries.push(series)
+      }
+
+      console.log('📊 Loaded series:', allSeries.map(s => ({
+        name: s.name,
+        dataPoints: s.data.length,
+        firstValue: s.data[0]?.value,
+        lastValue: s.data[s.data.length - 1]?.value
+      })))
+
+      setDataSeries(allSeries)
+      setGraphTitle(example.name)
+      setCurrentExampleName(example.name)
+    } catch (error) {
+      console.error('Error loading example:', error)
+      alert('Failed to load example data')
+    } finally {
+      setLoading(false)
+    }
   }
 
   const graphConfig: GraphConfig = {
@@ -196,6 +313,12 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+      {showExampleManager && (
+        <ExampleManager
+          onLoadExample={loadExampleFromManager}
+          onClose={() => setShowExampleManager(false)}
+        />
+      )}
       <div className="container mx-auto px-4 py-8">
         <header className="mb-8">
           <h1 className="text-4xl font-bold text-gray-900 dark:text-gray-100 mb-2">
@@ -208,18 +331,11 @@ export default function Home() {
 
         <div className="mb-6 flex flex-wrap gap-4">
           <button
-            onClick={loadExampleData}
+            onClick={() => setShowExampleManager(true)}
             disabled={loading}
-            className="px-6 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors disabled:opacity-50"
+            className="px-6 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors disabled:opacity-50"
           >
-            Load Weather Example
-          </button>
-          <button
-            onClick={loadSolarExample}
-            disabled={loading}
-            className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors disabled:opacity-50"
-          >
-            Load Solar Example
+            📊 Examples
           </button>
           <button
             onClick={clearData}
@@ -275,6 +391,19 @@ export default function Home() {
                   className="p-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
                 />
               </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Max Data Points
+                </label>
+                <input
+                  type="number"
+                  min="10"
+                  max="500"
+                  value={maxDataPoints}
+                  onChange={(e) => setMaxDataPoints(Math.min(500, Math.max(10, parseInt(e.target.value) || 100)))}
+                  className="w-24 p-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                />
+              </div>
               <button
                 onClick={reloadAllSources}
                 disabled={loading}
@@ -283,9 +412,19 @@ export default function Home() {
                 Update Graph
               </button>
             </div>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-              Applies to all API data sources with {"{{date}}"} template
-            </p>
+            <div className="mt-2">
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                {(() => {
+                  const totalDays = Math.ceil((dateRange.end.getTime() - dateRange.start.getTime()) / (1000 * 60 * 60 * 24)) + 1
+                  if (totalDays <= maxDataPoints) {
+                    return `Date range spans ${totalDays} days - all data will be fetched`
+                  } else {
+                    const interval = Math.ceil(totalDays / maxDataPoints)
+                    return `Date range spans ${totalDays} days - sampling every ~${interval} days to stay within ${maxDataPoints} point limit`
+                  }
+                })()}
+              </p>
+            </div>
           </div>
         )}
 
