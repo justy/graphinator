@@ -110,90 +110,81 @@ export class DataLoader {
       console.log(`   Sampling interval: approximately every ${Math.ceil(interval)} days`)
     }
 
-    // Fetch data sequentially with delays to avoid overwhelming the API
+    // Fetch data in parallel batches to speed up large date ranges
+    const BATCH_SIZE = 10 // Process 10 requests at a time
     const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
-    for (let index = 0; index < dates.length; index++) {
-      const date = dates[index]
+    console.log(`📅 Fetching ${dates.length} dates in batches of ${BATCH_SIZE}...`)
 
-      // Add a small delay between each request to avoid overwhelming the API
-      if (index > 0) {
-        await delay(50) // 50ms delay between each request
+    for (let batchStart = 0; batchStart < dates.length; batchStart += BATCH_SIZE) {
+      const batchEnd = Math.min(batchStart + BATCH_SIZE, dates.length)
+      const batchDates = dates.slice(batchStart, batchEnd)
+
+      // Add a small delay between batches to avoid overwhelming the API
+      if (batchStart > 0) {
+        await delay(100) // 100ms delay between batches
       }
-      try {
-        // Format date according to URL format
-        const formattedDate = format(date, urlDateFormat)
-        const url = urlTemplate.replace('{{date}}', formattedDate)
 
-        // Use proxy for localhost URLs to avoid CORS
-        const finalUrl = this.getProxiedUrl(url)
+      // Process batch in parallel
+      const batchPromises = batchDates.map(async (date) => {
+        try {
+          // Format date according to URL format
+          const formattedDate = format(date, urlDateFormat)
+          const url = urlTemplate.replace('{{date}}', formattedDate)
 
-        // Log the actual URL being called
-        console.log(`🔍 Fetching: ${url}`)
-        console.log(`   Via proxy: ${finalUrl}`)
+          // Use proxy for localhost URLs to avoid CORS
+          const finalUrl = this.getProxiedUrl(url)
 
-        const response = await axios.get(finalUrl, {
-          timeout: 5000  // 5 second timeout per request
-          // Removed validateStatus to let axios handle all 2xx codes as success
-        })
+          const response = await axios.get(finalUrl, {
+            timeout: 5000  // 5 second timeout per request
+          })
 
-        let responseData = response.data
+          let responseData = response.data
 
-        // Validate response has data
-        const dateStr = format(date, 'yyyy-MM-dd')
-        if (!responseData || Object.keys(responseData).length === 0) {
-          console.log(`⚪ Empty response for ${dateStr}`)
+          // Validate response has data
+          const dateStr = format(date, 'yyyy-MM-dd')
+          if (!responseData || Object.keys(responseData).length === 0) {
+            return null
+          }
+
+          // Always use our generated date to ensure consistency
+          // Set to midnight UTC to align with weather data
+          const alignedDate = new Date(date)
+          alignedDate.setUTCHours(0, 0, 0, 0)
+          responseData = {
+            ...responseData,
+            [config.timestampField]: alignedDate.toISOString()
+          }
+
+          return responseData
+        } catch (error) {
+          // Silent fail for individual dates in batch processing
+          if (axios.isAxiosError(error) && error.code === 'ECONNREFUSED') {
+            throw error // Re-throw connection errors to stop processing
+          }
           return null
         }
+      })
 
-        // Log successful fetch with value
-        if (responseData[config.valueField]) {
-          console.log(`✅ Got data for ${dateStr}: ${config.valueField}=${responseData[config.valueField]}`)
-        } else {
-          console.log(`⚪ Got response for ${dateStr} but no ${config.valueField} field`)
-        }
+      // Wait for all requests in the batch to complete
+      const batchResults = await Promise.all(batchPromises)
 
-        // Always use our generated date to ensure consistency
-        // Override whatever date the API returns to avoid parsing issues
-        // Set to midnight UTC to align with weather data
-        const alignedDate = new Date(date)
-        alignedDate.setUTCHours(0, 0, 0, 0)
-        responseData = {
-          ...responseData,
-          [config.timestampField]: alignedDate.toISOString()
-        }
+      // Add successful results to allData
+      const validResults = batchResults.filter(r => r !== null)
+      allData.push(...validResults)
 
-        allData.push(responseData)
-      } catch (error) {
-        // Log all failures to help debug
-        const dateStr = format(date, 'yyyy-MM-dd')
-        if (axios.isAxiosError(error)) {
-          if (error.response?.status === 404) {
-            console.log(`📊 No data for ${dateStr}: 404 Not Found`)
-          } else if (error.response?.status === 500) {
-            console.log(`❌ No data for ${dateStr}: 500 Server Error`)
-          } else if (error.code === 'ECONNREFUSED') {
-            console.warn('Solar API is not running')
-          } else {
-            console.warn(`⚠️ Failed to fetch ${dateStr}: ${error.response?.status || error.code}`)
-          }
-        } else {
-          console.error(`⚠️ Unexpected error for ${dateStr}:`, error)
-        }
-        // Continue to next date
-      }
+      // Log batch progress
+      console.log(`📊 Batch ${Math.floor(batchStart / BATCH_SIZE) + 1}/${Math.ceil(dates.length / BATCH_SIZE)}: ${validResults.length}/${batchDates.length} successful`)
     }
 
     // Log summary
-    console.log(`📊 Date Range Summary: ${allData.length} successful out of ${dates.length} total days`)
+    console.log(`📊 Date Range Summary: ${allData.length} successful out of ${dates.length} requested sample points`)
 
-    // If we're sampling and have gaps, interpolate missing values
-    if (dates.length > allData.length && allData.length >= 2) {
-      console.log(`📈 Interpolating ${dates.length - allData.length} missing values`)
-      allData = this.interpolateMissingData(allData, dates, config)
-    }
+    // Transform the data we have - don't interpolate to add more points
+    const transformedData = this.transformData(allData, config)
 
-    return this.transformData(allData, config)
+    console.log(`📊 Final data: ${transformedData.length} points (max ${maxPoints} requested)`)
+    return transformedData
   }
 
   private static interpolateMissingData(
@@ -384,15 +375,20 @@ export class DataLoader {
     try {
       // Use historical API for past dates, forecast API for future dates
       const today = new Date()
-      const start = new Date(startDate)
-      const isHistorical = start < today
+      const startDateObj = new Date(startDate)
+      const isHistorical = startDateObj < today
 
       const baseUrl = isHistorical
         ? 'https://archive-api.open-meteo.com/v1/archive'
         : 'https://api.open-meteo.com/v1/forecast'
 
       const url = `${baseUrl}?latitude=${latitude}&longitude=${longitude}&start_date=${startDate}&end_date=${endDate}&daily=${variable}&timezone=auto`
-      console.log(`🌤️ Fetching weather from: ${url}`)
+
+      // Calculate how many days we're requesting
+      const endDateObj = new Date(endDate)
+      const totalDays = Math.ceil((endDateObj.getTime() - startDateObj.getTime()) / (1000 * 60 * 60 * 24)) + 1
+
+      console.log(`🌤️ Fetching weather for ${totalDays} days (will sample to ${maxPoints} if needed)`)
       const response = await axios.get(url)
 
       if (!response.data || !response.data.daily) {
@@ -406,7 +402,7 @@ export class DataLoader {
 
       console.log(`🌤️ Weather response: ${times.length} days, first value: ${values[0]}, last value: ${values[values.length - 1]}`)
 
-      const points = times.map((time: string, index: number) => {
+      let points = times.map((time: string, index: number) => {
         // Ensure weather timestamps are at midnight UTC
         const timestamp = new Date(time)
         timestamp.setUTCHours(0, 0, 0, 0)
@@ -417,7 +413,22 @@ export class DataLoader {
         }
       })
 
-      console.log(`🌤️ Converted to ${points.length} data points`)
+      // Sample the points if we have more than maxPoints
+      if (points.length > maxPoints) {
+        console.log(`🌤️ Sampling ${points.length} points down to ${maxPoints}`)
+        const sampledPoints: DataPoint[] = []
+        const interval = points.length / maxPoints
+
+        for (let i = 0; i < maxPoints; i++) {
+          const index = Math.floor(i * interval)
+          if (index < points.length) {
+            sampledPoints.push(points[index])
+          }
+        }
+        points = sampledPoints
+      }
+
+      console.log(`🌤️ Returning ${points.length} data points`)
       return points
     } catch (error) {
       console.error('Error loading weather data:', error)

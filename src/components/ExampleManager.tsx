@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Example, ExampleDataSource, PREDEFINED_EXAMPLES, AVAILABLE_DATA_SOURCES, DataSourceTemplate } from '@/types/examples'
+import { Example, ExampleDataSource, PREDEFINED_EXAMPLES, AVAILABLE_DATA_SOURCES, DataSourceTemplate, PREDEFINED_LOCATIONS, Location } from '@/types/examples'
 import { DataSeries } from '@/types/data'
 
 interface ExampleManagerProps {
@@ -227,6 +227,7 @@ function ExampleEditor({ example, onSave, onCancel }: {
 }) {
   const [editedExample, setEditedExample] = useState(example)
   const [showDataSourcePicker, setShowDataSourcePicker] = useState(false)
+  const [editingDataSourceIndex, setEditingDataSourceIndex] = useState<number | null>(null)
 
   const updateDataSource = (index: number, updates: Partial<ExampleDataSource>) => {
     const newDataSources = [...editedExample.dataSources]
@@ -237,6 +238,19 @@ function ExampleEditor({ example, onSave, onCancel }: {
   const removeDataSource = (index: number) => {
     const newDataSources = editedExample.dataSources.filter((_, i) => i !== index)
     setEditedExample({ ...editedExample, dataSources: newDataSources })
+  }
+
+  const duplicateDataSource = (index: number) => {
+    const sourceToDuplicate = editedExample.dataSources[index]
+    const newDataSource: ExampleDataSource = {
+      ...sourceToDuplicate,
+      id: `${sourceToDuplicate.id}-copy-${Date.now()}`,
+      name: `${sourceToDuplicate.name} (Copy)`
+    }
+    setEditedExample({
+      ...editedExample,
+      dataSources: [...editedExample.dataSources, newDataSource]
+    })
   }
 
   const addDataSource = (template: DataSourceTemplate, config: any) => {
@@ -251,6 +265,19 @@ function ExampleEditor({ example, onSave, onCancel }: {
       dataSources: [...editedExample.dataSources, newDataSource]
     })
     setShowDataSourcePicker(false)
+  }
+
+  const updateExistingDataSource = (index: number, template: DataSourceTemplate, config: any) => {
+    const updatedDataSource: ExampleDataSource = {
+      id: editedExample.dataSources[index].id,  // Keep the same ID
+      name: config.name || template.name,
+      ...template.defaultConfig,
+      ...config
+    }
+    const newDataSources = [...editedExample.dataSources]
+    newDataSources[index] = updatedDataSource
+    setEditedExample({ ...editedExample, dataSources: newDataSources })
+    setEditingDataSourceIndex(null)
   }
 
   return (
@@ -299,51 +326,81 @@ function ExampleEditor({ example, onSave, onCancel }: {
           />
         )}
 
+        {editingDataSourceIndex !== null && (
+          <DataSourcePicker
+            initialDataSource={editedExample.dataSources[editingDataSourceIndex]}
+            onSelect={(template, config) => updateExistingDataSource(editingDataSourceIndex, template, config)}
+            onCancel={() => setEditingDataSourceIndex(null)}
+            isEditing={true}
+          />
+        )}
+
         {editedExample.dataSources.map((ds, index) => (
           <div key={ds.id} className="mb-4 p-4 border border-gray-200 dark:border-gray-700 rounded">
-            <div className="grid grid-cols-2 gap-2 mb-2">
-              <input
-                type="text"
-                value={ds.name}
-                onChange={(e) => updateDataSource(index, { name: e.target.value })}
-                placeholder="Source name"
-                className="p-2 border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-800 text-sm"
-              />
+            <div className="flex justify-between items-start mb-2">
+              <div className="flex-1">
+                <input
+                  type="text"
+                  value={ds.name}
+                  onChange={(e) => updateDataSource(index, { name: e.target.value })}
+                  placeholder="Source name"
+                  className="w-full p-2 border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-800 text-sm font-medium mb-2"
+                />
+                <div className="text-xs text-gray-500 dark:text-gray-400 space-y-1">
+                  {ds.weatherVariable && (
+                    <div>Weather: {ds.weatherVariable}</div>
+                  )}
+                  {ds.latitude && ds.longitude && (
+                    <div>Location: {ds.latitude}, {ds.longitude}</div>
+                  )}
+                  {ds.config.valueField && (
+                    <div>Field: {ds.config.valueField}</div>
+                  )}
+                  {ds.urlTemplate && (
+                    <div className="truncate">URL: {ds.urlTemplate}</div>
+                  )}
+                </div>
+              </div>
+              <div className="flex gap-1 ml-2">
+                <button
+                  onClick={() => setEditingDataSourceIndex(index)}
+                  className="px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-xs"
+                  title="Edit data source"
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={() => duplicateDataSource(index)}
+                  className="px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-xs"
+                  title="Duplicate data source"
+                >
+                  Copy
+                </button>
+                <button
+                  onClick={() => removeDataSource(index)}
+                  className="px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700 text-xs"
+                  title="Remove data source"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+            <div className="flex gap-2">
               <select
                 value={ds.chartType || 'line'}
                 onChange={(e) => updateDataSource(index, { chartType: e.target.value as any })}
-                className="p-2 border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-800 text-sm"
+                className="px-2 py-1 border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-800 text-sm"
               >
                 <option value="line">Line</option>
                 <option value="area">Area</option>
                 <option value="bar">Bar</option>
               </select>
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              <input
-                type="text"
-                value={ds.config.timestampField}
-                onChange={(e) => updateDataSource(index, {
-                  config: { ...ds.config, timestampField: e.target.value }
-                })}
-                placeholder="Timestamp field"
-                className="p-2 border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-800 text-sm"
-              />
-              <input
-                type="text"
-                value={ds.config.valueField}
-                onChange={(e) => updateDataSource(index, {
-                  config: { ...ds.config, valueField: e.target.value }
-                })}
-                placeholder="Value field"
-                className="p-2 border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-800 text-sm"
-              />
-              <button
-                onClick={() => removeDataSource(index)}
-                className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 text-sm"
+              <div
+                className="px-2 py-1 rounded text-sm"
+                style={{ backgroundColor: ds.color || '#666', color: 'white' }}
               >
-                Remove
-              </button>
+                Color: {ds.color || 'Auto'}
+              </div>
             </div>
           </div>
         ))}
@@ -367,12 +424,51 @@ function ExampleEditor({ example, onSave, onCancel }: {
   )
 }
 
-function DataSourcePicker({ onSelect, onCancel }: {
+function DataSourcePicker({ onSelect, onCancel, initialDataSource, isEditing }: {
   onSelect: (template: DataSourceTemplate, config: any) => void
   onCancel: () => void
+  initialDataSource?: ExampleDataSource
+  isEditing?: boolean
 }) {
-  const [selectedTemplate, setSelectedTemplate] = useState<DataSourceTemplate | null>(null)
-  const [config, setConfig] = useState<any>({})
+  // Initialize template and config from existing data source if editing
+  const [selectedTemplate, setSelectedTemplate] = useState<DataSourceTemplate | null>(() => {
+    if (!initialDataSource) return null
+
+    // Determine template based on data source properties
+    if (initialDataSource.weatherVariable) {
+      return AVAILABLE_DATA_SOURCES.find(t => t.id === 'weather') || null
+    } else if (initialDataSource.urlTemplate?.includes('sungrow_api')) {
+      return AVAILABLE_DATA_SOURCES.find(t => t.id === 'solar') || null
+    }
+    return null
+  })
+
+  const [config, setConfig] = useState<any>(() => {
+    if (!initialDataSource) return {}
+
+    // Check if the coordinates match a predefined location
+    let selectedLocation = 'custom'
+    if (initialDataSource.latitude && initialDataSource.longitude) {
+      const matchingLocation = PREDEFINED_LOCATIONS.find(
+        loc => Math.abs(loc.latitude - initialDataSource.latitude) < 0.01 &&
+               Math.abs(loc.longitude - initialDataSource.longitude) < 0.01
+      )
+      if (matchingLocation) {
+        selectedLocation = matchingLocation.name
+      }
+    }
+
+    return {
+      name: initialDataSource.name,
+      chartType: initialDataSource.chartType || 'line',
+      weatherVariable: initialDataSource.weatherVariable,
+      field: initialDataSource.config?.valueField,
+      latitude: initialDataSource.latitude?.toString(),
+      longitude: initialDataSource.longitude?.toString(),
+      selectedLocation,
+      color: initialDataSource.color
+    }
+  })
 
   const handleSelect = () => {
     if (!selectedTemplate) return
@@ -383,7 +479,10 @@ function DataSourcePicker({ onSelect, onCancel }: {
     if (selectedTemplate.type === 'weather' && config.weatherVariable) {
       const variable = selectedTemplate.weatherVariables?.find(v => v.value === config.weatherVariable)
       if (variable) {
-        defaultName = `${variable.label} (${variable.unit})`
+        const locationName = config.selectedLocation && config.selectedLocation !== 'custom'
+          ? config.selectedLocation
+          : 'Custom Location'
+        defaultName = `${variable.label} - ${locationName}`
       }
     } else if (selectedTemplate.type === 'solar' && config.field) {
       const field = selectedTemplate.availableFields?.find(f => f.value === config.field)
@@ -395,14 +494,18 @@ function DataSourcePicker({ onSelect, onCancel }: {
     // Build configuration based on template type
     const finalConfig: any = {
       name: config.name || defaultName,
-      chartType: config.chartType || selectedTemplate.defaultConfig?.chartType || 'line'
+      chartType: config.chartType || selectedTemplate.defaultConfig?.chartType || 'line',
+      color: config.color || (isEditing ? initialDataSource?.color : null) || getNextColor()
     }
 
     if (selectedTemplate.type === 'weather') {
-      finalConfig.latitude = parseFloat(config.latitude) || selectedTemplate.defaultConfig?.latitude
-      finalConfig.longitude = parseFloat(config.longitude) || selectedTemplate.defaultConfig?.longitude
+      // Parse coordinates, ensuring they're valid numbers
+      const lat = parseFloat(config.latitude)
+      const lon = parseFloat(config.longitude)
+
+      finalConfig.latitude = !isNaN(lat) ? lat : selectedTemplate.defaultConfig?.latitude
+      finalConfig.longitude = !isNaN(lon) ? lon : selectedTemplate.defaultConfig?.longitude
       finalConfig.weatherVariable = config.weatherVariable
-      finalConfig.color = config.color || getNextColor()
       finalConfig.config = {
         timestampField: 'timestamp',
         valueField: 'value'
@@ -413,7 +516,6 @@ function DataSourcePicker({ onSelect, onCancel }: {
         ...selectedTemplate.defaultConfig?.config,
         valueField: config.field || 'generated'
       }
-      finalConfig.color = config.color || getNextColor()
     }
 
     onSelect(selectedTemplate, finalConfig)
@@ -427,9 +529,9 @@ function DataSourcePicker({ onSelect, onCancel }: {
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white dark:bg-gray-900 rounded-lg p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
-        <h3 className="text-lg font-semibold mb-4">Add Data Source</h3>
+        <h3 className="text-lg font-semibold mb-4">{isEditing ? 'Edit Data Source' : 'Add Data Source'}</h3>
 
-        {!selectedTemplate ? (
+        {!selectedTemplate && !isEditing ? (
           <div className="space-y-4">
             <p className="text-sm text-gray-600 dark:text-gray-400">Select a data source type:</p>
             {AVAILABLE_DATA_SOURCES.map(template => (
@@ -487,26 +589,79 @@ function DataSourcePicker({ onSelect, onCancel }: {
                     ))}
                   </select>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium mb-2">Latitude</label>
-                    <input
-                      type="number"
-                      step="0.0001"
-                      value={config.latitude || selectedTemplate.defaultConfig?.latitude || ''}
-                      onChange={(e) => setConfig({ ...config, latitude: e.target.value })}
+
+                <div>
+                  <label className="block text-sm font-medium mb-2">Location</label>
+                  <div className="space-y-2">
+                    <select
+                      value={config.selectedLocation || 'custom'}
+                      onChange={(e) => {
+                        const locationName = e.target.value
+                        if (locationName === 'custom') {
+                          setConfig({ ...config, selectedLocation: 'custom' })
+                        } else {
+                          const location = PREDEFINED_LOCATIONS.find(l => l.name === locationName)
+                          if (location) {
+                            setConfig({
+                              ...config,
+                              selectedLocation: locationName,
+                              latitude: location.latitude.toString(),
+                              longitude: location.longitude.toString()
+                            })
+                          }
+                        }
+                      }}
                       className="w-full p-2 border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-800"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-2">Longitude</label>
-                    <input
-                      type="number"
-                      step="0.0001"
-                      value={config.longitude || selectedTemplate.defaultConfig?.longitude || ''}
-                      onChange={(e) => setConfig({ ...config, longitude: e.target.value })}
-                      className="w-full p-2 border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-800"
-                    />
+                    >
+                      <option value="custom">Custom Location</option>
+                      <optgroup label="Australia">
+                        {PREDEFINED_LOCATIONS.filter(l => l.country === 'Australia').map(location => (
+                          <option key={location.name} value={location.name}>
+                            {location.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="International">
+                        {PREDEFINED_LOCATIONS.filter(l => l.country !== 'Australia').map(location => (
+                          <option key={location.name} value={location.name}>
+                            {location.name}, {location.country}
+                          </option>
+                        ))}
+                      </optgroup>
+                    </select>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Latitude</label>
+                        <input
+                          type="number"
+                          step="0.0001"
+                          value={config.latitude || ''}
+                          onChange={(e) => setConfig({
+                            ...config,
+                            latitude: e.target.value,
+                            selectedLocation: 'custom'
+                          })}
+                          placeholder="-34.2900"
+                          className="w-full p-2 border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-800"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Longitude</label>
+                        <input
+                          type="number"
+                          step="0.0001"
+                          value={config.longitude || ''}
+                          onChange={(e) => setConfig({
+                            ...config,
+                            longitude: e.target.value,
+                            selectedLocation: 'custom'
+                          })}
+                          placeholder="150.9480"
+                          className="w-full p-2 border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-800"
+                        />
+                      </div>
+                    </div>
                   </div>
                 </div>
               </>
@@ -530,17 +685,37 @@ function DataSourcePicker({ onSelect, onCancel }: {
               </div>
             )}
 
-            <div>
-              <label className="block text-sm font-medium mb-2">Chart Type</label>
-              <select
-                value={config.chartType || selectedTemplate.defaultConfig?.chartType || 'line'}
-                onChange={(e) => setConfig({ ...config, chartType: e.target.value })}
-                className="w-full p-2 border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-800"
-              >
-                <option value="line">Line</option>
-                <option value="area">Area</option>
-                <option value="bar">Bar</option>
-              </select>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-2">Chart Type</label>
+                <select
+                  value={config.chartType || selectedTemplate.defaultConfig?.chartType || 'line'}
+                  onChange={(e) => setConfig({ ...config, chartType: e.target.value })}
+                  className="w-full p-2 border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-800"
+                >
+                  <option value="line">Line</option>
+                  <option value="area">Area</option>
+                  <option value="bar">Bar</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-2">Color</label>
+                <div className="flex gap-2">
+                  <input
+                    type="color"
+                    value={config.color || '#3B82F6'}
+                    onChange={(e) => setConfig({ ...config, color: e.target.value })}
+                    className="w-12 h-10 border border-gray-300 dark:border-gray-700 rounded cursor-pointer"
+                  />
+                  <input
+                    type="text"
+                    value={config.color || ''}
+                    onChange={(e) => setConfig({ ...config, color: e.target.value })}
+                    placeholder="#3B82F6"
+                    className="flex-1 p-2 border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-800 font-mono text-sm"
+                  />
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -572,7 +747,7 @@ function DataSourcePicker({ onSelect, onCancel }: {
               }
               className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
             >
-              Add Data Source
+              {isEditing ? 'Update Data Source' : 'Add Data Source'}
             </button>
           )}
         </div>

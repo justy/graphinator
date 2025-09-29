@@ -1,5 +1,31 @@
 import { TransformConfig } from './data'
 
+// Predefined locations for weather data
+export interface Location {
+  name: string
+  latitude: number
+  longitude: number
+  country?: string
+}
+
+export const PREDEFINED_LOCATIONS: Location[] = [
+  { name: 'Coledale', latitude: -34.2900, longitude: 150.9480, country: 'Australia' },
+  { name: 'Sydney', latitude: -33.8688, longitude: 151.2093, country: 'Australia' },
+  { name: 'Melbourne', latitude: -37.8136, longitude: 144.9631, country: 'Australia' },
+  { name: 'Brisbane', latitude: -27.4698, longitude: 153.0251, country: 'Australia' },
+  { name: 'Perth', latitude: -31.9505, longitude: 115.8605, country: 'Australia' },
+  { name: 'Auckland', latitude: -36.8485, longitude: 174.7633, country: 'New Zealand' },
+  { name: 'London', latitude: 51.5074, longitude: -0.1278, country: 'UK' },
+  { name: 'New York', latitude: 40.7128, longitude: -74.0060, country: 'USA' },
+  { name: 'San Francisco', latitude: 37.7749, longitude: -122.4194, country: 'USA' },
+  { name: 'Tokyo', latitude: 35.6762, longitude: 139.6503, country: 'Japan' },
+  { name: 'Paris', latitude: 48.8566, longitude: 2.3522, country: 'France' },
+  { name: 'Berlin', latitude: 52.5200, longitude: 13.4050, country: 'Germany' },
+  { name: 'Singapore', latitude: 1.3521, longitude: 103.8198, country: 'Singapore' },
+  { name: 'Dubai', latitude: 25.2048, longitude: 55.2708, country: 'UAE' },
+  { name: 'Cape Town', latitude: -33.9249, longitude: 18.4241, country: 'South Africa' }
+]
+
 // Available data source templates
 export interface DataSourceTemplate {
   id: string
@@ -41,8 +67,8 @@ export const AVAILABLE_DATA_SOURCES: DataSourceTemplate[] = [
       { value: 'weathercode', label: 'Weather Code', unit: 'WMO' }
     ],
     defaultConfig: {
-      latitude: -34.4278,  // Default to Coledale
-      longitude: 150.9451,
+      latitude: -34.2900,  // Default to Coledale
+      longitude: 150.9480,
       chartType: 'line',
       config: {
         timestampField: 'timestamp',
@@ -109,8 +135,8 @@ export const PREDEFINED_EXAMPLES: Example[] = [
       {
         id: 'coledale-temp',
         name: 'Max Temperature (°C)',
-        latitude: -34.4278,
-        longitude: 150.9451,
+        latitude: -34.2900,
+        longitude: 150.9480,
         weatherVariable: 'temperature_2m_max',
         config: {
           timestampField: 'timestamp',
@@ -162,8 +188,8 @@ export const PREDEFINED_EXAMPLES: Example[] = [
       {
         id: 'combined-temp',
         name: 'Max Temperature (°C)',
-        latitude: -34.4278,
-        longitude: 150.9451,
+        latitude: -34.2900,
+        longitude: 150.9480,
         weatherVariable: 'temperature_2m_max',
         config: {
           timestampField: 'timestamp',

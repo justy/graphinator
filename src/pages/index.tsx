@@ -61,22 +61,13 @@ export default function Home() {
 
   const [currentExampleName, setCurrentExampleName] = useState<string | null>(null)
 
+  const [currentExample, setCurrentExample] = useState<Example | null>(null)
+
   const reloadAllSources = async () => {
     // Check if we're showing examples
-    if (showExamples && currentExampleName) {
+    if (showExamples && currentExample) {
       // Reload the current example with new date range
-      setLoading(true)
-
-      // Determine which example to reload based on the current title
-      if (currentExampleName.includes('Solar Generation vs Temperature')) {
-        await loadSolarVsTemperatureExample()
-      } else if (currentExampleName.includes('Solar vs Consumption')) {
-        await loadSolarVsConsumptionExample()
-      } else if (currentExampleName.includes('Solar Generation') && !currentExampleName.includes('vs')) {
-        await loadSolarExample()
-      } else if (currentExampleName.includes('Weather')) {
-        await loadExampleData()
-      }
+      await loadExampleFromManager(currentExample)
       return
     }
 
@@ -103,13 +94,15 @@ export default function Home() {
     try {
       // Use the graph's date range instead of hardcoded dates
       const weatherData = await DataLoader.loadWeatherData(
-        -34.4278,  // Coledale, NSW, Australia latitude
-        150.9451,  // Coledale, NSW, Australia longitude
+        -34.2900,  // Coledale, NSW, Australia latitude
+        150.9480,  // Coledale, NSW, Australia longitude
         format(dateRange.start, 'yyyy-MM-dd'),
         format(dateRange.end, 'yyyy-MM-dd'),
         'temperature_2m_max',
         maxDataPoints
       )
+
+      console.log(`📊 Weather data loaded: ${weatherData.length} points (max ${maxDataPoints} requested)`)
 
       const weatherSeries: DataSeries = {
         id: 'weather-temp',
@@ -121,8 +114,8 @@ export default function Home() {
       }
 
       const precipData = await DataLoader.loadWeatherData(
-        -34.4278,  // Coledale, NSW, Australia latitude
-        150.9451,  // Coledale, NSW, Australia longitude
+        -34.2900,  // Coledale, NSW, Australia latitude
+        150.9480,  // Coledale, NSW, Australia longitude
         format(dateRange.start, 'yyyy-MM-dd'),
         format(dateRange.end, 'yyyy-MM-dd'),
         'precipitation_sum',
@@ -152,19 +145,6 @@ export default function Home() {
     }
   }
 
-  const loadSolarVsTemperatureExample = async () => {
-    const example = PREDEFINED_EXAMPLES.find(e => e.id === 'solar-vs-temperature')
-    if (example) {
-      await loadExampleFromManager(example)
-    }
-  }
-
-  const loadSolarVsConsumptionExample = async () => {
-    const example = PREDEFINED_EXAMPLES.find(e => e.id === 'solar-consumption')
-    if (example) {
-      await loadExampleFromManager(example)
-    }
-  }
 
   const loadSolarExample = async () => {
     setLoading(true)
@@ -184,6 +164,8 @@ export default function Home() {
       }
 
       const data = await DataLoader.loadFromAPI(urlTemplate, config, dateRange, maxDataPoints)
+
+      console.log(`📊 Solar data loaded: ${data.length} points (max ${maxDataPoints} requested)`)
 
       // Only set data if we got valid results
       if (data && data.length > 0) {
@@ -221,12 +203,14 @@ export default function Home() {
     setGraphTitle('Data Visualization')
     setShowExamples(false)
     setCurrentExampleName(null)
+    setCurrentExample(null)
   }
 
   const loadExampleFromManager = async (example: Example) => {
     setLoading(true)
     setShowExamples(true)
     setDataSeries([])
+    setCurrentExample(example)
 
     try {
       const allSeries: DataSeries[] = []
@@ -298,8 +282,16 @@ export default function Home() {
         name: s.name,
         dataPoints: s.data.length,
         firstValue: s.data[0]?.value,
-        lastValue: s.data[s.data.length - 1]?.value
+        lastValue: s.data[s.data.length - 1]?.value,
+        maxPointsRequested: maxDataPoints
       })))
+
+      // Verify max points enforcement
+      allSeries.forEach(series => {
+        if (series.data.length > maxDataPoints * 1.1) { // Allow 10% tolerance
+          console.warn(`⚠️ Series "${series.name}" has ${series.data.length} points, exceeding max of ${maxDataPoints}!`)
+        }
+      })
 
       setDataSeries(allSeries)
       setGraphTitle(example.name)
@@ -440,6 +432,18 @@ export default function Home() {
           <div className="text-center py-8">
             <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 dark:border-gray-100"></div>
             <p className="mt-2 text-gray-600 dark:text-gray-400">Loading data...</p>
+            {(() => {
+              const totalDays = Math.ceil((dateRange.end.getTime() - dateRange.start.getTime()) / (1000 * 60 * 60 * 24)) + 1
+              const actualPoints = Math.min(totalDays, maxDataPoints)
+              if (actualPoints > 50) {
+                return (
+                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                    Fetching {actualPoints} data points in parallel batches...
+                  </p>
+                )
+              }
+              return null
+            })()}
           </div>
         )}
 
