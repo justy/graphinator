@@ -40,27 +40,39 @@ export class DataLoader {
     return this.transformData(data, config)
   }
 
-  static async loadFromAPI(url: string, config: TransformConfig): Promise<DataPoint[]> {
+  static async loadFromAPI(
+    url: string,
+    config: TransformConfig,
+    dateRange?: { start: Date; end: Date }
+  ): Promise<DataPoint[]> {
     // Check if this is a date range request with URL template
-    if (config.dateRange && url.includes('{{date}}')) {
-      return this.loadDateRangeFromAPI(url, config)
+    if (dateRange && url.includes('{{date}}')) {
+      return this.loadDateRangeFromAPI(url, config, dateRange)
     }
 
-    // Single API call
-    const response = await axios.get(url)
+    // Single API call - use proxy for localhost URLs to avoid CORS
+    const finalUrl = this.getProxiedUrl(url)
+    const response = await axios.get(finalUrl)
     const data = Array.isArray(response.data) ? response.data : [response.data]
     return this.transformData(data, config)
   }
 
+  private static getProxiedUrl(url: string): string {
+    // Check if this is a localhost URL that needs proxying
+    if (url.includes('localhost:') || url.includes('127.0.0.1:')) {
+      // Use our proxy endpoint
+      return `/api/proxy?url=${encodeURIComponent(url)}`
+    }
+    return url
+  }
+
   private static async loadDateRangeFromAPI(
     urlTemplate: string,
-    config: TransformConfig
+    config: TransformConfig,
+    dateRange: { start: Date; end: Date }
   ): Promise<DataPoint[]> {
-    if (!config.dateRange) {
-      throw new Error('Date range configuration required')
-    }
-
-    const { start, end, urlDateFormat } = config.dateRange
+    const { start, end } = dateRange
+    const urlDateFormat = config.urlDateFormat || 'yyyy-MM-dd'
     const allData: any[] = []
 
     // Generate dates for the range
@@ -73,39 +85,81 @@ export class DataLoader {
       currentDate.setDate(currentDate.getDate() + 1)
     }
 
-    // Fetch data for each date
-    const promises = dates.map(async (date) => {
+    // Fetch data sequentially with delays to avoid overwhelming the API
+    const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+    console.log(`📅 Fetching data for ${dates.length} dates sequentially...`)
+
+    for (let index = 0; index < dates.length; index++) {
+      const date = dates[index]
+
+      // Add a small delay between each request to avoid overwhelming the API
+      if (index > 0) {
+        await delay(50) // 50ms delay between each request
+      }
       try {
         // Format date according to URL format
         const formattedDate = format(date, urlDateFormat)
         const url = urlTemplate.replace('{{date}}', formattedDate)
 
-        const response = await axios.get(url)
+        // Use proxy for localhost URLs to avoid CORS
+        const finalUrl = this.getProxiedUrl(url)
+
+        // Log the actual URL being called
+        console.log(`🔍 Fetching: ${url}`)
+        console.log(`   Via proxy: ${finalUrl}`)
+
+        const response = await axios.get(finalUrl, {
+          timeout: 5000  // 5 second timeout per request
+          // Removed validateStatus to let axios handle all 2xx codes as success
+        })
+
         let responseData = response.data
 
-        // If response doesn't have the timestamp field, add the date
-        if (!responseData[config.timestampField]) {
-          responseData = {
-            ...responseData,
-            [config.timestampField]: date.toISOString()
-          }
+        // Validate response has data
+        const dateStr = format(date, 'yyyy-MM-dd')
+        if (!responseData || Object.keys(responseData).length === 0) {
+          console.log(`⚪ Empty response for ${dateStr}`)
+          return null
         }
 
-        return responseData
+        // Log successful fetch with value
+        if (responseData[config.valueField]) {
+          console.log(`✅ Got data for ${dateStr}: ${config.valueField}=${responseData[config.valueField]}`)
+        } else {
+          console.log(`⚪ Got response for ${dateStr} but no ${config.valueField} field`)
+        }
+
+        // Always use our generated date to ensure consistency
+        // Override whatever date the API returns to avoid parsing issues
+        responseData = {
+          ...responseData,
+          [config.timestampField]: date.toISOString()
+        }
+
+        allData.push(responseData)
       } catch (error) {
-        console.warn(`Failed to fetch data for ${format(date, 'yyyy-MM-dd')}:`, error)
-        return null
+        // Log all failures to help debug
+        const dateStr = format(date, 'yyyy-MM-dd')
+        if (axios.isAxiosError(error)) {
+          if (error.response?.status === 404) {
+            console.log(`📊 No data for ${dateStr}: 404 Not Found`)
+          } else if (error.response?.status === 500) {
+            console.log(`❌ No data for ${dateStr}: 500 Server Error`)
+          } else if (error.code === 'ECONNREFUSED') {
+            console.warn('Solar API is not running')
+          } else {
+            console.warn(`⚠️ Failed to fetch ${dateStr}: ${error.response?.status || error.code}`)
+          }
+        } else {
+          console.error(`⚠️ Unexpected error for ${dateStr}:`, error)
+        }
+        // Continue to next date
       }
-    })
+    }
 
-    const results = await Promise.all(promises)
-
-    // Filter out failed requests and collect data
-    results.forEach(result => {
-      if (result) {
-        allData.push(result)
-      }
-    })
+    // Log summary
+    console.log(`📊 Date Range Summary: ${allData.length} successful out of ${dates.length} total days`)
 
     return this.transformData(allData, config)
   }

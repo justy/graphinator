@@ -28,17 +28,18 @@ export interface TransformConfig {
   valueField: string
   labelField?: string
   dateFormat?: string
+  urlDateFormat?: string
   aggregation?: 'sum' | 'average' | 'min' | 'max'
-  dateRange?: {
-    start: Date
-    end: Date
-    urlDateFormat: string
-  }
   filter?: {
     field: string
     operator: 'equals' | 'contains' | 'greater' | 'less'
     value: string | number
   }[]
+}
+
+export interface DateRange {
+  start: Date
+  end: Date
 }
 
 export interface GraphConfig {

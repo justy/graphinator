@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import DataGraph from '@/components/DataGraph'
 import DataSourceManager from '@/components/DataSourceManager'
 import { DataLoader } from '@/lib/dataLoader'
-import { DataSource, DataSeries, GraphConfig, DataPoint } from '@/types/data'
+import { DataSource, DataSeries, GraphConfig, DataPoint, TransformConfig, DateRange } from '@/types/data'
 import { format, subDays } from 'date-fns'
 
 export default function Home() {
@@ -11,9 +11,17 @@ export default function Home() {
   const [loading, setLoading] = useState(false)
   const [graphTitle, setGraphTitle] = useState('Data Visualization')
   const [showExamples, setShowExamples] = useState(false)
+  const [dateRange, setDateRange] = useState<DateRange>({
+    start: subDays(new Date(), 30),
+    end: new Date()
+  })
 
   const handleAddSource = async (source: DataSource) => {
     setDataSources([...dataSources, source])
+    await loadDataForSource(source)
+  }
+
+  const loadDataForSource = async (source: DataSource) => {
     setLoading(true)
 
     try {
@@ -24,7 +32,7 @@ export default function Home() {
       } else if (source.type === 'json' && source.file && source.transformConfig) {
         data = await DataLoader.loadFromJSON(source.file, source.transformConfig)
       } else if (source.type === 'api' && source.url && source.transformConfig) {
-        data = await DataLoader.loadFromAPI(source.url, source.transformConfig)
+        data = await DataLoader.loadFromAPI(source.url, source.transformConfig, dateRange)
       }
 
       const newSeries: DataSeries = {
@@ -34,10 +42,41 @@ export default function Home() {
         type: 'line'
       }
 
-      setDataSeries([...dataSeries, newSeries])
+      // Update or add the series
+      setDataSeries(prev => {
+        const filtered = prev.filter(s => s.id !== source.id)
+        return [...filtered, newSeries]
+      })
     } catch (error) {
       console.error('Error loading data:', error)
       alert('Failed to load data source. Please check your configuration.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const reloadAllSources = async () => {
+    // Check if we're showing examples
+    if (showExamples) {
+      // Reload the currently active example
+      if (graphTitle.includes('Solar')) {
+        await loadSolarExample()
+      } else if (graphTitle.includes('Weather')) {
+        await loadExampleData()
+      }
+      return
+    }
+
+    // Otherwise reload custom data sources
+    if (dataSources.length === 0) return
+
+    setLoading(true)
+    setDataSeries([])
+
+    try {
+      for (const source of dataSources) {
+        await loadDataForSource(source)
+      }
     } finally {
       setLoading(false)
     }
@@ -48,14 +87,12 @@ export default function Home() {
     setShowExamples(true)
 
     try {
-      const endDate = new Date()
-      const startDate = subDays(endDate, 7)
-
+      // Use the graph's date range instead of hardcoded dates
       const weatherData = await DataLoader.loadWeatherData(
-        37.7749,
-        -122.4194,
-        format(startDate, 'yyyy-MM-dd'),
-        format(endDate, 'yyyy-MM-dd'),
+        -34.4278,  // Coledale, NSW, Australia latitude
+        150.9451,  // Coledale, NSW, Australia longitude
+        format(dateRange.start, 'yyyy-MM-dd'),
+        format(dateRange.end, 'yyyy-MM-dd'),
         'temperature_2m_max'
       )
 
@@ -69,10 +106,10 @@ export default function Home() {
       }
 
       const precipData = await DataLoader.loadWeatherData(
-        37.7749,
-        -122.4194,
-        format(startDate, 'yyyy-MM-dd'),
-        format(endDate, 'yyyy-MM-dd'),
+        -34.4278,  // Coledale, NSW, Australia latitude
+        150.9451,  // Coledale, NSW, Australia longitude
+        format(dateRange.start, 'yyyy-MM-dd'),
+        format(dateRange.end, 'yyyy-MM-dd'),
         'precipitation_sum'
       )
 
@@ -85,8 +122,12 @@ export default function Home() {
         unit: 'mm'
       }
 
-      setDataSeries([weatherSeries, precipSeries])
-      setGraphTitle('San Francisco Weather - Last 7 Days')
+      // setDataSeries([weatherSeries, precipSeries])
+      setDataSeries([weatherSeries])
+
+      // Update title to reflect the actual date range
+      const days = Math.ceil((dateRange.end.getTime() - dateRange.start.getTime()) / (1000 * 60 * 60 * 24))
+      setGraphTitle(`Coledale Weather - ${days} Days`)
     } catch (error) {
       console.error('Error loading example data:', error)
       alert('Failed to load example data')
@@ -99,47 +140,38 @@ export default function Home() {
     setLoading(true)
     setShowExamples(true)
 
+    // Clear previous data to ensure consistency
+    setDataSeries([])
+
     try {
-      const today = new Date()
-      const dates = Array.from({ length: 7 }, (_, i) => subDays(today, i))
-
-      const solarPromises = dates.map(date =>
-        DataLoader.loadSolarData(format(date, 'yyyy-MM-dd'))
-      )
-
-      const results = await Promise.all(solarPromises)
-
-      const generationData: DataPoint[] = []
-      const consumptionData: DataPoint[] = []
-
-      results.forEach(dayData => {
-        const genPoint = dayData.find(p => p.label?.includes('Generation'))
-        const consPoint = dayData.find(p => p.label?.includes('Consumption'))
-
-        if (genPoint) generationData.push(genPoint)
-        if (consPoint) consumptionData.push(consPoint)
-      })
-
-      const generationSeries: DataSeries = {
-        id: 'solar-gen',
-        name: 'Solar Generation',
-        data: generationData,
-        type: 'area',
-        color: '#10B981',
-        unit: 'kWh'
+      // Use the graph's date range
+      const urlTemplate = 'http://sungrow_api.localhost:3000/daily?date={{date}}'
+      const config: TransformConfig = {
+        timestampField: 'date',
+        valueField: 'generated',
+        urlDateFormat: 'ddMMyyyy'
       }
 
-      const consumptionSeries: DataSeries = {
-        id: 'power-cons',
-        name: 'Power Consumption',
-        data: consumptionData,
-        type: 'line',
-        color: '#EF4444',
-        unit: 'kWh'
-      }
+      const data = await DataLoader.loadFromAPI(urlTemplate, config, dateRange)
 
-      setDataSeries([generationSeries, consumptionSeries])
-      setGraphTitle('Solar Generation vs Power Consumption - Last 7 Days')
+      // Only set data if we got valid results
+      if (data && data.length > 0) {
+        const generationSeries: DataSeries = {
+          id: 'solar-gen',
+          name: 'Solar Generation',
+          data,
+          type: 'area',
+          color: '#10B981',
+          unit: 'kWh'
+        }
+
+        setDataSeries([generationSeries])
+        const days = Math.ceil((dateRange.end.getTime() - dateRange.start.getTime()) / (1000 * 60 * 60 * 24))
+        setGraphTitle(`Solar Generation - ${days} Days (${data.length} days with data)`)
+      } else {
+        alert('No solar data available for the selected period')
+        setDataSeries([])
+      }
     } catch (error) {
       console.error('Error loading solar data:', error)
       alert('Failed to load solar data. Make sure the solar API is running.')
@@ -202,6 +234,59 @@ export default function Home() {
             onAddSource={handleAddSource}
             sources={dataSources}
           />
+        )}
+
+        {/* Date Range Controls */}
+        {(dataSources.length > 0 || showExamples) && (
+          <div className="bg-white dark:bg-gray-900 p-6 rounded-lg shadow-lg mb-6">
+            <h3 className="text-lg font-semibold mb-4 text-gray-800 dark:text-gray-100">
+              Date Range for Graph
+            </h3>
+            <div className="flex flex-wrap gap-4 items-end">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Start Date
+                </label>
+                <input
+                  type="date"
+                  value={format(dateRange.start, 'yyyy-MM-dd')}
+                  onChange={(e) => {
+                    const newDate = new Date(e.target.value)
+                    if (newDate < dateRange.end) {
+                      setDateRange({ ...dateRange, start: newDate })
+                    }
+                  }}
+                  className="p-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  End Date
+                </label>
+                <input
+                  type="date"
+                  value={format(dateRange.end, 'yyyy-MM-dd')}
+                  onChange={(e) => {
+                    const newDate = new Date(e.target.value)
+                    if (newDate > dateRange.start) {
+                      setDateRange({ ...dateRange, end: newDate })
+                    }
+                  }}
+                  className="p-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                />
+              </div>
+              <button
+                onClick={reloadAllSources}
+                disabled={loading}
+                className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50"
+              >
+                Update Graph
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+              Applies to all API data sources with {"{{date}}"} template
+            </p>
+          </div>
         )}
 
         {loading && (

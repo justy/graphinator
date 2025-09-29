@@ -32,6 +32,13 @@ export default function DataGraph({ config }: DataGraphProps) {
 
   const formatXAxis = (tickItem: string) => {
     const date = new Date(tickItem)
+    // Show year if the data spans multiple years
+    const firstDate = new Date(chartData[0]?.timestamp || tickItem)
+    const lastDate = new Date(chartData[chartData.length - 1]?.timestamp || tickItem)
+
+    if (firstDate.getFullYear() !== lastDate.getFullYear()) {
+      return format(date, 'MMM dd, yyyy')
+    }
     return format(date, 'MMM dd')
   }
 

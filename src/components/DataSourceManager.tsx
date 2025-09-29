@@ -1,6 +1,5 @@
 import React, { useState } from 'react'
 import { DataSource, TransformConfig } from '@/types/data'
-import { format, subDays } from 'date-fns'
 
 interface DataSourceManagerProps {
   onAddSource: (source: DataSource) => void
@@ -15,9 +14,6 @@ export default function DataSourceManager({ onAddSource, sources }: DataSourceMa
   const [timestampField, setTimestampField] = useState('timestamp')
   const [valueField, setValueField] = useState('value')
   const [dateFormat, setDateFormat] = useState('')
-  const [useDateRange, setUseDateRange] = useState(false)
-  const [startDate, setStartDate] = useState(format(subDays(new Date(), 7), 'yyyy-MM-dd'))
-  const [endDate, setEndDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [urlDateFormat, setUrlDateFormat] = useState('ddMMyyyy')
 
   const handleAddSource = () => {
@@ -40,11 +36,7 @@ export default function DataSourceManager({ onAddSource, sources }: DataSourceMa
       timestampField,
       valueField,
       dateFormat: dateFormat || undefined,
-      dateRange: useDateRange ? {
-        start: new Date(startDate),
-        end: new Date(endDate),
-        urlDateFormat: urlDateFormat
-      } : undefined
+      urlDateFormat: urlDateFormat || 'ddMMyyyy'
     }
 
     const newSource: DataSource = {
@@ -122,67 +114,25 @@ export default function DataSourceManager({ onAddSource, sources }: DataSourceMa
                 className="w-full p-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
               />
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                Use {"{{date}}"} where the date should be inserted
+                Use {"{{date}}"} where the date should be inserted (will fetch data for each day in the graph date range)
               </p>
             </div>
 
             <div className="col-span-2">
-              <label className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  checked={useDateRange}
-                  onChange={(e) => setUseDateRange(e.target.checked)}
-                  className="rounded"
-                />
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Fetch data for date range
-                </span>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                URL Date Format
               </label>
+              <input
+                type="text"
+                value={urlDateFormat}
+                onChange={(e) => setUrlDateFormat(e.target.value)}
+                placeholder="ddMMyyyy"
+                className="w-full p-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+              />
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Format for {"{{date}}"} in URL (e.g., ddMMyyyy for 24092025, yyyy-MM-dd for 2025-09-24)
+              </p>
             </div>
-
-            {useDateRange && (
-              <>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Start Date
-                  </label>
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    className="w-full p-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    End Date
-                  </label>
-                  <input
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    className="w-full p-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  />
-                </div>
-
-                <div className="col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    URL Date Format
-                  </label>
-                  <input
-                    type="text"
-                    value={urlDateFormat}
-                    onChange={(e) => setUrlDateFormat(e.target.value)}
-                    placeholder="ddMMyyyy"
-                    className="w-full p-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                  />
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    Format for {"{{date}}"} in URL (e.g., ddMMyyyy for 24092025)
-                  </p>
-                </div>
-              </>
-            )}
           </>
         )}
 
