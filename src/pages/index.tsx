@@ -187,11 +187,15 @@ export default function Home() {
 
       // Only set data if we got valid results
       if (data && data.length > 0) {
+        // Use line chart for sampled data to avoid visual artifacts
+        const totalDays = Math.ceil((dateRange.end.getTime() - dateRange.start.getTime()) / (1000 * 60 * 60 * 24)) + 1
+        const isSampled = totalDays > maxDataPoints
+
         const generationSeries: DataSeries = {
           id: 'solar-gen',
           name: 'Solar Generation',
           data,
-          type: 'area',
+          type: isSampled ? 'line' : 'area',
           color: '#10B981',
           unit: 'kWh'
         }
@@ -272,11 +276,15 @@ export default function Home() {
           console.warn(`⚠️ No valid data source configuration found for ${dataSource.name}`)
         }
 
+        // Use line chart for sampled data to avoid visual artifacts
+        const totalDays = Math.ceil((dateRange.end.getTime() - dateRange.start.getTime()) / (1000 * 60 * 60 * 24)) + 1
+        const isSampled = totalDays > maxDataPoints
+
         const series: DataSeries = {
           id: dataSource.id,
           name: dataSource.name,
           data,
-          type: dataSource.chartType || 'line',
+          type: isSampled && dataSource.chartType === 'area' ? 'line' : (dataSource.chartType || 'line'),
           color: dataSource.color,
           unit: dataSource.name.includes('°C') ? '°C' :
                 dataSource.name.includes('kWh') ? 'kWh' :

@@ -75,7 +75,7 @@ export class DataLoader {
   ): Promise<DataPoint[]> {
     const { start, end } = dateRange
     const urlDateFormat = config.urlDateFormat || 'yyyy-MM-dd'
-    const allData: any[] = []
+    let allData: any[] = []
 
     // Generate dates for the range
     const startDate = new Date(start)
@@ -187,7 +187,98 @@ export class DataLoader {
     // Log summary
     console.log(`📊 Date Range Summary: ${allData.length} successful out of ${dates.length} total days`)
 
+    // If we're sampling and have gaps, interpolate missing values
+    if (dates.length > allData.length && allData.length >= 2) {
+      console.log(`📈 Interpolating ${dates.length - allData.length} missing values`)
+      allData = this.interpolateMissingData(allData, dates, config)
+    }
+
     return this.transformData(allData, config)
+  }
+
+  private static interpolateMissingData(
+    existingData: any[],
+    targetDates: Date[],
+    config: TransformConfig
+  ): any[] {
+    // Create a map of existing data by date
+    const dataMap = new Map<string, any>()
+    existingData.forEach(item => {
+      const date = new Date(item[config.timestampField])
+      const dateKey = format(date, 'yyyy-MM-dd')
+      dataMap.set(dateKey, item)
+    })
+
+    // Sort existing data by date for interpolation
+    const sortedData = existingData
+      .map(item => ({
+        ...item,
+        date: new Date(item[config.timestampField])
+      }))
+      .sort((a, b) => a.date.getTime() - b.date.getTime())
+
+    // Build complete dataset with interpolation
+    const result: any[] = []
+
+    targetDates.forEach(targetDate => {
+      const dateKey = format(targetDate, 'yyyy-MM-dd')
+      const alignedDate = new Date(targetDate)
+      alignedDate.setUTCHours(0, 0, 0, 0)
+
+      if (dataMap.has(dateKey)) {
+        // Use existing data
+        result.push(dataMap.get(dateKey))
+      } else {
+        // Interpolate between nearest neighbors
+        let before = null
+        let after = null
+
+        for (let i = 0; i < sortedData.length; i++) {
+          if (sortedData[i].date < targetDate) {
+            before = sortedData[i]
+          } else if (sortedData[i].date > targetDate && !after) {
+            after = sortedData[i]
+            break
+          }
+        }
+
+        if (before && after) {
+          // Linear interpolation
+          const totalTime = after.date.getTime() - before.date.getTime()
+          const elapsed = targetDate.getTime() - before.date.getTime()
+          const ratio = elapsed / totalTime
+
+          const beforeValue = before[config.valueField] || 0
+          const afterValue = after[config.valueField] || 0
+          const interpolatedValue = beforeValue + (afterValue - beforeValue) * ratio
+
+          result.push({
+            [config.timestampField]: alignedDate.toISOString(),
+            [config.valueField]: interpolatedValue,
+            interpolated: true // Mark as interpolated
+          })
+        } else if (before) {
+          // Use last known value (forward fill)
+          result.push({
+            [config.timestampField]: alignedDate.toISOString(),
+            [config.valueField]: before[config.valueField] || 0,
+            interpolated: true
+          })
+        } else if (after) {
+          // Use next known value (backward fill)
+          result.push({
+            [config.timestampField]: alignedDate.toISOString(),
+            [config.valueField]: after[config.valueField] || 0,
+            interpolated: true
+          })
+        }
+      }
+    })
+
+    return result.sort((a, b) =>
+      new Date(a[config.timestampField]).getTime() -
+      new Date(b[config.timestampField]).getTime()
+    )
   }
 
   private static transformData(rawData: any[], config: TransformConfig): DataPoint[] {
