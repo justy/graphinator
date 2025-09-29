@@ -41,9 +41,73 @@ export class DataLoader {
   }
 
   static async loadFromAPI(url: string, config: TransformConfig): Promise<DataPoint[]> {
+    // Check if this is a date range request with URL template
+    if (config.dateRange && url.includes('{{date}}')) {
+      return this.loadDateRangeFromAPI(url, config)
+    }
+
+    // Single API call
     const response = await axios.get(url)
     const data = Array.isArray(response.data) ? response.data : [response.data]
     return this.transformData(data, config)
+  }
+
+  private static async loadDateRangeFromAPI(
+    urlTemplate: string,
+    config: TransformConfig
+  ): Promise<DataPoint[]> {
+    if (!config.dateRange) {
+      throw new Error('Date range configuration required')
+    }
+
+    const { start, end, urlDateFormat } = config.dateRange
+    const allData: any[] = []
+
+    // Generate dates for the range
+    const currentDate = new Date(start)
+    const endDate = new Date(end)
+    const dates: Date[] = []
+
+    while (currentDate <= endDate) {
+      dates.push(new Date(currentDate))
+      currentDate.setDate(currentDate.getDate() + 1)
+    }
+
+    // Fetch data for each date
+    const promises = dates.map(async (date) => {
+      try {
+        // Format date according to URL format
+        const formattedDate = format(date, urlDateFormat)
+        const url = urlTemplate.replace('{{date}}', formattedDate)
+
+        const response = await axios.get(url)
+        let responseData = response.data
+
+        // If response doesn't have the timestamp field, add the date
+        if (!responseData[config.timestampField]) {
+          responseData = {
+            ...responseData,
+            [config.timestampField]: date.toISOString()
+          }
+        }
+
+        return responseData
+      } catch (error) {
+        console.warn(`Failed to fetch data for ${format(date, 'yyyy-MM-dd')}:`, error)
+        return null
+      }
+    })
+
+    const results = await Promise.all(promises)
+
+    // Filter out failed requests and collect data
+    results.forEach(result => {
+      if (result) {
+        allData.push(result)
+      }
+    })
+
+    return this.transformData(allData, config)
   }
 
   private static transformData(rawData: any[], config: TransformConfig): DataPoint[] {

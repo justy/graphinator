@@ -29,6 +29,11 @@ export interface TransformConfig {
   labelField?: string
   dateFormat?: string
   aggregation?: 'sum' | 'average' | 'min' | 'max'
+  dateRange?: {
+    start: Date
+    end: Date
+    urlDateFormat: string
+  }
   filter?: {
     field: string
     operator: 'equals' | 'contains' | 'greater' | 'less'
